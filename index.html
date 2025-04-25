@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>EELS Viewer</title>
+  <script src="https://3dmol.csb.pitt.edu/build/3Dmol-min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/plotly.js-dist-min@2.27.0/plotly.min.js"></script>
+  <style>
+    body {
+      display: flex;
+      flex-direction: row;
+      height: 100vh;
+      margin: 0;
+      font-family: 'Segoe UI', sans-serif;
+      background-color: #f7f7f7;
+    }
+    #viewer {
+      flex: 1;
+      padding: 30px;
+      background-color: white;
+      box-shadow: 0 0 20px rgba(0,0,0,0.05);
+    }
+    #plot {
+      flex: 1;
+      padding: 30px 40px;
+      background-color: white;
+      box-shadow: 0 0 20px rgba(0,0,0,0.05);
+    }
+    #plot-title {
+      text-align: center;
+      font-size: 24px;
+      font-weight: 600;
+      margin-bottom: 20px;
+    }
+    #eels-plot {
+      width: 100%;
+      height: 80%;
+    }
+  </style>
+</head>
+<body>
+  <div id="viewer"></div>
+  <div id="plot">
+    <h2 id="plot-title">Click an oxygen atom</h2>
+    <div id="eels-plot"></div>
+  </div>
+
+  <script>
+    const viewer = $3Dmol.createViewer("viewer", { backgroundColor: "white" });
+    const oxygenAtoms = [];
+    let lastClickedSerial = null;
+
+    fetch('ucell_1.xyz')
+      .then(res => res.text())
+      .then(data => {
+        viewer.addModel(data, 'xyz');
+        viewer.setStyle({}, {
+          stick: {
+            radius: 0.15,
+            colorfunc: atom => {
+              if (atom.elem === 'O') return 'white';
+              if (atom.elem === 'In') return 'red';
+              if (atom.elem === 'Ga') return 'green';
+              if (atom.elem === 'Zn') return 'purple';
+              return 'gray';
+            }
+          },
+          sphere: {
+            scale: 0.25,
+            colorscheme: {
+              O: 'white',
+              In: 'red',
+              Ga: 'green',
+              Zn: 'purple'
+            }
+          }
+        });
+        viewer.zoomTo();
+        viewer.render();
+
+        const atoms = viewer.getModel().selectedAtoms({});
+        let count = 0;
+        atoms.forEach(atom => {
+          if (atom.elem === 'O') {
+            oxygenAtoms.push({ serial: atom.serial, index: count });
+            count++;
+          }
+        });
+
+        viewer.setClickable({ elem: 'O' }, true, atom => {
+          const found = oxygenAtoms.find(entry => entry.serial === atom.serial);
+          if (!found) return;
+
+          console.log(`✅ CLICKED: env_${found.index}`);
+
+          // 스타일 강조
+          if (lastClickedSerial !== null) {
+            viewer.setStyle({ serial: lastClickedSerial }, {
+              stick: { radius: 0.15 },
+              sphere: { scale: 0.25 }
+            });
+          }
+          viewer.setStyle({ serial: atom.serial }, {
+            stick: { radius: 0.2, color: 'yellow' },
+            sphere: { scale: 0.35, color: 'yellow' }
+          });
+          lastClickedSerial = atom.serial;
+          viewer.render();
+
+          // EELS 데이터 표시
+          const id = `env_${found.index}`;
+          fetch('eels_data.json')
+            .then(r => r.json())
+            .then(data => {
+              const spectrum = data[id];
+              if (!spectrum) {
+                alert(`❌ No EELS data for ${id}`);
+                return;
+              }
+
+              const energies = Object.keys(spectrum).map(e => parseFloat(e));
+              const values = Object.values(spectrum);
+
+              Plotly.newPlot('eels-plot', [{
+                x: energies,
+                y: values,
+                type: 'scatter',
+                mode: 'lines',
+                line: { color: '#1f77b4', width: 2.5 }
+              }], {
+                title: `EELS Spectrum for ${id}`,
+                margin: { l: 60, r: 30, t: 40, b: 50 },
+                xaxis: {
+                  title: 'Energy (eV)',
+                  titlefont: { size: 16 },
+                  tickfont: { size: 13 }
+                },
+                yaxis: {
+                  title: 'Intensity',
+                  titlefont: { size: 16 },
+                  tickfont: { size: 13 }
+                },
+                plot_bgcolor: '#ffffff',
+                paper_bgcolor: '#ffffff',
+                font: { family: 'Segoe UI', size: 14 },
+                hovermode: 'closest'
+              });
+
+              document.getElementById('plot-title').innerText = `EELS for ${id}`;
+            });
+        });
+
+        viewer.render();  // 클릭 적용 후 최종 렌더링
+      });
+  </script>
+</body>
+</html>
